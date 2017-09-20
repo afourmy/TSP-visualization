@@ -1,12 +1,14 @@
-from collections import OrderedDict
+from collections import defaultdict
 from inspect import stack
 from json import load
+from math import asin, cos, radians, sin, sqrt
 from os.path import abspath, dirname, join
 from pyproj import Proj
 from PyQt5.QtCore import (
                           QByteArray,
                           QDataStream,
                           QIODevice,
+                          QLineF,
                           QMimeData,
                           QPoint,
                           QPointF,
@@ -32,6 +34,7 @@ from PyQt5.QtWidgets import (
                              QFrame,
                              QGraphicsEllipseItem,
                              QGraphicsItem,
+                             QGraphicsLineItem,
                              QGraphicsPixmapItem,
                              QGraphicsPolygonItem,
                              QGraphicsRectItem,
@@ -80,6 +83,9 @@ class Controller(QMainWindow):
         layout = QHBoxLayout(central_widget)
         layout.addWidget(self.view)
         
+        # best fitness value
+        self.best_fitness = float('inf')
+        
     def import_cities(self):
         filepath = QFileDialog.getOpenFileName(
                                             self, 
@@ -89,18 +95,47 @@ class Controller(QMainWindow):
                                             
         with open(join(self.path_data, 'cities.json')) as data:    
             cities = load(data)
-        allowed_cities = [c for c in cities if int(c['population']) > 500000]
-        self.count = len(allowed_cities)
-        for city in allowed_cities:
+        self.allowed_cities = [c for c in cities if int(c['population']) > 500000]
+        self.cities = []
+        for city in self.allowed_cities:
             longitude, latitude = city['longitude'], city['latitude']
-            x, y = self.view.to_canvas_coordinates(longitude, latitude)
-            Node(self, city['city'], QPointF(x, y))
-                
-    def run(self):
-        sample = list(range(self.count))
-        random.shuffle(sample)
-        print(sample)
+            self.cities.append(Node(self, city))
+        self.distances_matrix()
+            
+    def haversine_distance(self, s, d):
+        coord = (s.longitude, s.latitude, d.longitude, d.latitude)
+        # decimal degrees to radians conversion
+        lon_s, lat_s, lon_d, lat_d = map(radians, coord)
+        delta_lon = lon_d - lon_s 
+        delta_lat = lat_d - lat_s 
+        a = sin(delta_lat/2)**2 + cos(lat_s)*cos(lat_d)*sin(delta_lon/2)**2
+        c = 2*asin(sqrt(a)) 
+        # radius of earth: 6371 km
+        return c*6371
         
+    def distances_matrix(self):
+        size = range(len(self.cities))
+        self.dist = defaultdict(dict)
+        for s in self.cities:
+            for d in self.cities:
+                self.dist[s][d] = self.dist[d][s] = self.haversine_distance(s, d)
+                
+    def fitness(self, solution):
+        total_length = 0
+        for i in range(len(solution)):
+            total_length += self.dist[solution[i]][solution[(i+1)%len(solution)]]
+        return total_length
+        
+    def run(self):
+        self.timer = self.startTimer(1)
+        
+    def timerEvent(self, event):
+        sample = random.sample(self.cities, len(self.cities))
+        fitness_value = self.fitness(sample)
+        if fitness_value < self.best_fitness:
+            self.best_fitness = fitness_value
+            self.view.visualize_solution(sample)
+            print(fitness_value)
     
 class View(QGraphicsView):
     
@@ -125,8 +160,8 @@ class View(QGraphicsView):
         self.polygons = self.scene.createItemGroup(self.draw_polygons())
         self.draw_water()
         
-        # set of graphical nodes
-        self.nodes = set()
+        # set of graphical objects
+        self.nodes, self.links = set(), set()
 
     ## Zoom system
 
@@ -200,25 +235,43 @@ class View(QGraphicsView):
         earth_water.setBrush(self.water_brush)
         self.polygons.addToGroup(earth_water)
         
+    ## Visualiation of a TSP solution
+    
+    def visualize_solution(self, solution):
+        for link in self.links:
+            self.scene.removeItem(link)
+        self.links.clear()
+        for i in range(len(solution)):
+            source, destination = solution[i], solution[(i+1)%len(solution)]
+            Link(self.controller, source, destination)
+        
+class Link(QGraphicsLineItem):
+    
+    def __init__(self, controller, source, destination):
+        super().__init__()
+        self.controller = controller
+        self.view = controller.view
+        self.view.links.add(self)
+        start_position = source.pos()
+        end_position = destination.pos()
+        self.setLine(QLineF(start_position, end_position))
+        self.view.scene.addItem(self)
+        
 class Node(QGraphicsPixmapItem):
     
-    def __init__(self, controller, name, position):
+    def __init__(self, controller, city):
         self.controller = controller
         self.view = controller.view
         self.view.nodes.add(self)
+        self.longitude, self.latitude = city['longitude'], city['latitude']
+        x, y = self.view.to_canvas_coordinates(self.longitude, self.latitude)
+        position = QPointF(x, y)
         self.pixmap = self.controller.node_pixmap
         super().__init__(self.pixmap)
-        self.setOffset(
-                       QPointF(
-                               -self.boundingRect().width()/2, 
-                               -self.boundingRect().height()/2
-                               )
-                       )
         self.setZValue(2)
         self.view.scene.addItem(self)
-        self.setCursor(QCursor(Qt.PointingHandCursor))
         self.setPos(position)
-        label = self.view.scene.addSimpleText(name)
+        label = self.view.scene.addSimpleText(city['city'])
         label.setPos(position + QPoint(-30, 30))
         
     def itemChange(self, change, value):
@@ -227,14 +280,6 @@ class Node(QGraphicsPixmapItem):
                 self.setPixmap(self.selection_pixmap)
             else:
                 self.setPixmap(self.pixmap)
-        # if change == self.ItemPositionHasChanged:
-        #     # when the node is created, the ItemPositionHasChanged is triggered:
-        #     # we create the label
-        #     if not hasattr(self, 'label'):
-        #         self.label = self.view.scene.addSimpleText('test')
-        #         self.label.setZValue(15)
-        #     self.label.setPos(self.pos() + QPoint(-70, 50))
-        #     self.label.setText('({}, {})'.format(lon, lat))
         return QGraphicsPixmapItem.itemChange(self, change, value)
         
 if str.__eq__(__name__, '__main__'):
