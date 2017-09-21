@@ -65,11 +65,7 @@ class Controller(QMainWindow):
         path_icon = join(path_app, 'images')
         
         # city icon
-        path_node = join(path_icon, 'city.gif')
-        self.node_pixmap = QPixmap(path_node).scaled(QSize(50, 50),
-                                                    Qt.KeepAspectRatio,
-                                                    Qt.SmoothTransformation
-                                                    )
+        self.node_pixmap = QPixmap(join(path_icon, 'city.ico'))
         
         menu_bar = self.menuBar()
         import_cities = QAction('Import cities', self)
@@ -79,8 +75,11 @@ class Controller(QMainWindow):
         menu_bar.addAction(import_cities)
         menu_bar.addAction(run)
 
-        self.view = View(self)        
+        self.view = View(self)
+        self.main_menu = MainMenu(self)
+        
         layout = QHBoxLayout(central_widget)
+        layout.addWidget(self.main_menu) 
         layout.addWidget(self.view)
         
         # best fitness value
@@ -95,12 +94,18 @@ class Controller(QMainWindow):
                                             
         with open(join(self.path_data, 'cities.json')) as data:    
             cities = load(data)
-        self.allowed_cities = [c for c in cities if int(c['population']) > 500000]
+        population = float(self.main_menu.dataset.city_population_edit.text())
+        self.allowed_cities = [c for c in cities if int(c['population']) > population]
         self.cities = []
         for city in self.allowed_cities:
             longitude, latitude = city['longitude'], city['latitude']
             self.cities.append(Node(self, city))
         self.distances_matrix()
+        
+    def run(self):
+        # sample = random.sample(self.cities, len(self.cities))
+        # self.two_opt(sample)
+        self.timer = self.startTimer(1)
             
     def haversine_distance(self, s, d):
         coord = (s.longitude, s.latitude, d.longitude, d.latitude)
@@ -126,16 +131,42 @@ class Controller(QMainWindow):
             total_length += self.dist[solution[i]][solution[(i+1)%len(solution)]]
         return total_length
         
-    def run(self):
-        self.timer = self.startTimer(1)
+    ## Mutation methods
+    
+    def random_swap(self, solution):
+        i, j = random.randrange(len(solution)), random.randrange(len(solution))
+        solution[i], solution[j] = solution[j], solution[i]
+        
+    def two_opt(self, solution):
+        # http://www.gcd.org/sengoku/docs/arob98.pdf
+        stable = False
+        while not stable:
+            stable = True
+            edges = zip(solution, solution[1:] + [solution[0]])
+            for edgeA in edges:
+                for edgeB in edges:
+                    (a, b), (c, d) = edgeA, edgeB
+                    ab, cd = self.dist[a][b], self.dist[c][d]
+                    ac, bd = self.dist[a][c], self.dist[b][d]
+                    if ab + cd > ac + bd:
+                        for index, city in enumerate(solution):
+                            if city == b:
+                                solution[index] = c
+                            if city == c:
+                                solution[index] = b
+                            stable = False
+        return solution
         
     def timerEvent(self, event):
         sample = random.sample(self.cities, len(self.cities))
-        fitness_value = self.fitness(sample)
+        solution = self.two_opt(sample)
+        fitness_value = self.fitness(solution)
         if fitness_value < self.best_fitness:
-            self.best_fitness = fitness_value
-            self.view.visualize_solution(sample)
             print(fitness_value)
+            self.best_fitness = fitness_value
+            self.view.visualize_solution(solution, type='best')
+        else:
+            self.view.visualize_solution(solution)
     
 class View(QGraphicsView):
     
@@ -154,14 +185,21 @@ class View(QGraphicsView):
         # brush for water and lands
         self.water_brush = QBrush(QColor(64, 164, 223))
         self.land_brush = QBrush(QColor(52, 165, 111))
-        self.land_pen = QPen(QColor(0, 0, 0))
+        self.land_pen = QPen(QColor(0, 0, 0), 5)
         
         # draw the map 
         self.polygons = self.scene.createItemGroup(self.draw_polygons())
         self.draw_water()
         
         # set of graphical objects
-        self.nodes, self.links = set(), set()
+        self.nodes = set()
+        self.links = {'best': set(), 'current': set()}
+        
+        # pen for links
+        self.pens = {
+                    'best': QPen(QColor(255, 0, 0), 7), 
+                    'current': QPen(QColor(0, 0, 255), 4)
+                    }
 
     ## Zoom system
 
@@ -235,15 +273,23 @@ class View(QGraphicsView):
         earth_water.setBrush(self.water_brush)
         self.polygons.addToGroup(earth_water)
         
+    def redraw_map(self):
+        self.scene.removeItem(self.polygons)
+        self.polygons = self.scene.createItemGroup(self.draw_polygons())
+        self.draw_water()
+        self.controller.import_cities()
+        
     ## Visualiation of a TSP solution
     
-    def visualize_solution(self, solution):
-        for link in self.links:
+    def visualize_solution(self, solution, type='current'):
+        for link in self.links[type]:
             self.scene.removeItem(link)
-        self.links.clear()
+        self.links[type].clear()
         for i in range(len(solution)):
             source, destination = solution[i], solution[(i+1)%len(solution)]
-            Link(self.controller, source, destination)
+            link = Link(self.controller, source, destination)
+            self.links[type].add(link)
+            link.setPen(self.pens[type])
         
 class Link(QGraphicsLineItem):
     
@@ -251,7 +297,6 @@ class Link(QGraphicsLineItem):
         super().__init__()
         self.controller = controller
         self.view = controller.view
-        self.view.links.add(self)
         start_position = source.pos()
         end_position = destination.pos()
         self.setLine(QLineF(start_position, end_position))
@@ -268,6 +313,12 @@ class Node(QGraphicsPixmapItem):
         position = QPointF(x, y)
         self.pixmap = self.controller.node_pixmap
         super().__init__(self.pixmap)
+        self.setOffset(
+                       QPointF(
+                               -self.boundingRect().width()/2, 
+                               -self.boundingRect().height()/2
+                               )
+                       )
         self.setZValue(2)
         self.view.scene.addItem(self)
         self.setPos(position)
@@ -281,6 +332,45 @@ class Node(QGraphicsPixmapItem):
             else:
                 self.setPixmap(self.pixmap)
         return QGraphicsPixmapItem.itemChange(self, change, value)
+        
+class MainMenu(QWidget):
+    
+    def __init__(self, controller):
+        super().__init__(controller)
+        self.controller = controller
+        self.setFixedSize(350, 800)
+        self.setAcceptDrops(True)
+                
+        self.dataset = DatasetGroupbox(self.controller)
+        
+        layout = QGridLayout(self)
+        layout.addWidget(self.dataset)
+
+class DatasetGroupbox(QGroupBox):
+    
+    def __init__(self, controller):
+        super().__init__(controller)
+        self.controller = controller
+        
+        city_population = QLabel('Minimum population')
+        self.city_population_edit = QLineEdit('400000')
+        
+        node_size = QLabel('Node size')
+        self.node_size_edit = QLineEdit('400')
+        
+        update_dataset = QPushButton('Update dataset')
+        update_dataset.clicked.connect(self.update_dataset)
+        
+        layout = QGridLayout(self)
+        layout.addWidget(city_population, 0, 0)
+        layout.addWidget(self.city_population_edit, 0, 1)
+        layout.addWidget(node_size, 1, 0)
+        layout.addWidget(self.node_size_edit, 1, 1)
+        layout.addWidget(update_dataset, 2, 0, 1, 2)
+        
+    def update_dataset(self, _):
+        self.controller.view.ratio = 1/float(self.node_size_edit.text())
+        self.controller.view.redraw_map()
         
 if str.__eq__(__name__, '__main__'):
     import sys
