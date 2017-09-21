@@ -86,12 +86,6 @@ class Controller(QMainWindow):
         self.best_fitness = float('inf')
         
     def import_cities(self):
-        filepath = QFileDialog.getOpenFileName(
-                                            self, 
-                                            'Import cities', 
-                                            self.path_data
-                                            )[0]
-                                            
         with open(join(self.path_data, 'cities.json')) as data:    
             cities = load(data)
         population = float(self.main_menu.dataset.city_population_edit.text())
@@ -138,7 +132,6 @@ class Controller(QMainWindow):
         solution[i], solution[j] = solution[j], solution[i]
         
     def two_opt(self, solution):
-        # http://www.gcd.org/sengoku/docs/arob98.pdf
         stable = False
         while not stable:
             stable = True
@@ -162,8 +155,8 @@ class Controller(QMainWindow):
         solution = self.two_opt(sample)
         fitness_value = self.fitness(solution)
         if fitness_value < self.best_fitness:
-            print(fitness_value)
             self.best_fitness = fitness_value
+            self.main_menu.score.setText(str(round(fitness_value, 2)) + ' km')
             self.view.visualize_solution(solution, type='best')
         else:
             self.view.visualize_solution(solution)
@@ -325,14 +318,6 @@ class Node(QGraphicsPixmapItem):
         label = self.view.scene.addSimpleText(city['city'])
         label.setPos(position + QPoint(-30, 30))
         
-    def itemChange(self, change, value):
-        if change == self.ItemSelectedHasChanged:
-            if self.isSelected():
-                self.setPixmap(self.selection_pixmap)
-            else:
-                self.setPixmap(self.pixmap)
-        return QGraphicsPixmapItem.itemChange(self, change, value)
-        
 class MainMenu(QWidget):
     
     def __init__(self, controller):
@@ -341,10 +326,14 @@ class MainMenu(QWidget):
         self.setFixedSize(350, 800)
         self.setAcceptDrops(True)
                 
+        self.score = QLabel()
+        self.score.setStyleSheet('font: 25pt; color: red;')
+        
         self.dataset = DatasetGroupbox(self.controller)
         
         layout = QGridLayout(self)
-        layout.addWidget(self.dataset)
+        layout.addWidget(self.score, 0, 0)
+        layout.addWidget(self.dataset, 1, 0)
 
 class DatasetGroupbox(QGroupBox):
     
