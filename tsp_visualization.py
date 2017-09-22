@@ -63,18 +63,8 @@ class Controller(QMainWindow):
         
         self.path_data = join(path_app, 'data')
         path_icon = join(path_app, 'images')
-        
-        # city icon
         self.node_pixmap = QPixmap(join(path_icon, 'city.ico'))
         
-        menu_bar = self.menuBar()
-        import_cities = QAction('Import cities', self)
-        import_cities.triggered.connect(self.import_cities)
-        run = QAction('Run', self)
-        run.triggered.connect(self.run)
-        menu_bar.addAction(import_cities)
-        menu_bar.addAction(run)
-
         self.view = View(self)
         self.main_menu = MainMenu(self)
         
@@ -95,11 +85,6 @@ class Controller(QMainWindow):
             longitude, latitude = city['longitude'], city['latitude']
             self.cities.append(Node(self, city))
         self.distances_matrix()
-        
-    def run(self):
-        # sample = random.sample(self.cities, len(self.cities))
-        # self.two_opt(sample)
-        self.timer = self.startTimer(1)
             
     def haversine_distance(self, s, d):
         coord = (s.longitude, s.latitude, d.longitude, d.latitude)
@@ -143,10 +128,8 @@ class Controller(QMainWindow):
                     ac, bd = self.dist[a][c], self.dist[b][d]
                     if ab + cd > ac + bd:
                         for index, city in enumerate(solution):
-                            if city == b:
-                                solution[index] = c
-                            if city == c:
-                                solution[index] = b
+                            if city in (b, c):
+                                solution[index] = c if city == b else b
                             stable = False
         return solution
         
@@ -329,13 +312,44 @@ class MainMenu(QWidget):
         self.score = QLabel()
         self.score.setStyleSheet('font: 25pt; color: red;')
         
-        self.dataset = DatasetGroupbox(self.controller)
+        self.dataset = DatasetGroupBox(self.controller)
+        self.algorithms = AlgorithmGroupBox(self.controller)
         
         layout = QGridLayout(self)
         layout.addWidget(self.score, 0, 0)
-        layout.addWidget(self.dataset, 1, 0)
+        layout.addWidget(self.algorithms, 1, 0)
+        layout.addWidget(self.dataset, 2, 0)
+        
+class AlgorithmGroupBox(QGroupBox):
+    
+    algorithms = ('greedy', '2-opt')
+        
+    def __init__(self, controller):
+        super().__init__(controller)
+        self.controller = controller
+        
+        self.algorithm_list = QComboBox(self)
+        self.algorithm_list.addItems(self.algorithms)
+        
+        start = QPushButton('Start')
+        start.clicked.connect(self.start)
+        
+        stop = QPushButton('Stop')
+        stop.clicked.connect(self.stop)
+        
+        layout = QGridLayout(self)
+        layout.addWidget(self.algorithm_list, 0, 0)
+        layout.addWidget(start, 1, 0)
+        layout.addWidget(stop, 2, 0)
+        
+    def start(self):
+        self.controller.timer = self.controller.startTimer(1)
+        
+    def stop(self):
+        self.controller.killTimer(self.controller.timer)
+        self.controller.timer = None
 
-class DatasetGroupbox(QGroupBox):
+class DatasetGroupBox(QGroupBox):
     
     def __init__(self, controller):
         super().__init__(controller)
