@@ -78,6 +78,7 @@ class Controller(QMainWindow):
     def import_cities(self):
         with open(join(self.path_data, 'cities.json')) as data:    
             cities = load(data)
+        print(len(cities))
         population = float(self.main_menu.dataset.city_population_edit.text())
         self.allowed_cities = [c for c in cities if int(c['population']) > population]
         self.cities = []
@@ -137,9 +138,10 @@ class Controller(QMainWindow):
         sample = random.sample(self.cities, len(self.cities))
         solution = self.two_opt(sample)
         fitness_value = self.fitness(solution)
+        self.main_menu.score.setText(str(round(fitness_value, 2)) + ' km')
         if fitness_value < self.best_fitness:
             self.best_fitness = fitness_value
-            self.main_menu.score.setText(str(round(fitness_value, 2)) + ' km')
+            self.main_menu.best_score.setText(str(round(fitness_value, 2)) + ' km')
             self.view.visualize_solution(solution, type='best')
         else:
             self.view.visualize_solution(solution)
@@ -308,17 +310,21 @@ class MainMenu(QWidget):
         self.controller = controller
         self.setFixedSize(350, 800)
         self.setAcceptDrops(True)
-                
+        
         self.score = QLabel()
-        self.score.setStyleSheet('font: 25pt; color: red;')
+        self.score.setStyleSheet('font: 20pt; color: blue;')
+                
+        self.best_score = QLabel()
+        self.best_score.setStyleSheet('font: 20pt; color: red;')
         
         self.dataset = DatasetGroupBox(self.controller)
         self.algorithms = AlgorithmGroupBox(self.controller)
         
         layout = QGridLayout(self)
         layout.addWidget(self.score, 0, 0)
-        layout.addWidget(self.algorithms, 1, 0)
-        layout.addWidget(self.dataset, 2, 0)
+        layout.addWidget(self.best_score, 1, 0)
+        layout.addWidget(self.algorithms, 2, 0)
+        layout.addWidget(self.dataset, 3, 0)
         
 class AlgorithmGroupBox(QGroupBox):
     
